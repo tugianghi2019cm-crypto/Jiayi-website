@@ -1,0 +1,150 @@
+name: CI
+
+# Runs on every push and pull request, on any branch. The repository
+# has not yet settled on a fixed branch-naming/protection strategy
+# (see FND-001/FND-002), so this intentionally does not filter by
+# branch name rather than inventing one. Narrow this to specific
+# branches (e.g. `main`) once that's decided.
+"on":
+  push:
+  pull_request:
+
+# Least-privilege: this workflow only checks out the repo and runs
+# read-only quality checks. It does not deploy, create releases,
+# write packages, open issues/PRs, or modify repository content.
+permissions:
+  contents: read
+
+# Safe, non-secret values for the core configuration contract
+# (FND-002) plus a syntactically-valid but entirely fake DATABASE_URL
+# (DB-001). None of these are credentials:
+# - APP_ENV/APP_BASE_URL: see FND-002's README section on those.
+# - DATABASE_URL: `npm ci`'s postinstall step runs `prisma generate`,
+#   which needs a resolvable, valid-shaped postgresql:// URL to load
+#   its config — but never connects to it. This points at a
+#   non-existent local address ("db-does-not-exist"); no real
+#   database is contacted or required for the quality gate to pass.
+#   Declared again, identically, at the `quality` job level below as
+#   a defense-in-depth measure so there is no ambiguity about env
+#   scope for that job specifically.
+# No other future integration secrets (GOOGLE_CLIENT_*, STORAGE_*,
+# TRANSLATION_*, VAPID_*) are required or referenced here.
+env:
+  APP_ENV: test
+  APP_BASE_URL: http://localhost:3000
+  DATABASE_URL: postgresql://ci:ci@db-does-not-exist:5432/ci
+
+jobs:
+  quality:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    # Declared again at job level (identical to the workflow-level
+    # values above) so this job's env is unambiguous and self-
+    # contained, independent of workflow-level inheritance.
+    env:
+      APP_ENV: test
+      APP_BASE_URL: http://localhost:3000
+      DATABASE_URL: postgresql://ci:ci@db-does-not-exist:5432/ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Node >=22.12.0 is a genuine, confirmed requirement of the
+          # approved Prisma 7.10.0 dependency graph — not a guess.
+          # `prisma` depends on `@prisma/dev@0.24.17` (the package that
+          # implements prisma.config.ts loading), which depends on
+          # `@prisma/streams-local@0.1.11`, whose own package.json
+          # declares `engines.node: ">=22.0.0"`. Separately, `vitest`
+          # 5.0.0 declares `engines.node: "^22.12.0 || ^24.0.0 ||
+          # >=26.0.0"` and does not support Node 20 at all. '22'
+          # resolves to the latest available Node 22.x release, which
+          # satisfies both.
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # Intentionally no deployment step: this workflow validates
+      # code quality only (FND-003). It does not deploy to Hostinger
+      # or anywhere else.
+
+  db-verification:
+    name: Database Verification
+    runs-on: ubuntu-latest
+    # Isolated from the `quality` job on purpose (see DB-001 Product
+    # Owner review, section 8): ordinary lint/typecheck/test/build
+    # must stay deterministic and never require a live database. This
+    # job exists solely to prove the Prisma + PostgreSQL mechanism
+    # itself works, against a throwaway database that exists only for
+    # the lifetime of this job.
+    services:
+      postgres:
+        image: postgres:16
+        # Disposable, CI-only credentials. This database is created
+        # fresh for this job and destroyed when it ends — it is never
+        # Jiayi staging/production data, and these credentials grant
+        # no access outside this CI job.
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      APP_ENV: test
+      APP_BASE_URL: http://localhost:3000
+      # Overrides the workflow-level placeholder above: this job's
+      # DATABASE_URL points at the real (but disposable, CI-only)
+      # Postgres service container defined above.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # See the `quality` job's identical comment above — Node
+          # >=22.12.0 is a confirmed requirement of the approved
+          # Prisma 7.10.0 dependency graph, not a guess.
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      - name: Prisma validate
+        run: npm run db:validate
+
+      - name: Prisma generate
+        run: npm run db:generate
+
+      - name: Prisma migrate deploy
+        run: npm run db:migrate:deploy
+
+      # Intentionally no further steps: this job only proves the
+      # database mechanism (config load → connect → generate →
+      # migrate) works. It does not deploy anything, does not contact
+      # Hostinger, and does not run a production migration — the
+      # database it talks to exists only inside this job.

@@ -1,0 +1,21 @@
+// Prisma schema for the Jiayi Website project.
+//
+// DB-001 establishes only the database foundation — connection,
+// migration mechanism, and generated client. No Jiayi business
+// tables (User, Member, Page, Block, Tool, Campaign, Form, Order,
+// Building, Translation, PushSubscription, NotificationBroadcast,
+// etc.) are defined here; those belong to later implementation
+// tasks. This file intentionally has zero models.
+//
+// As of Prisma ORM v7, the connection URL no longer lives here — see
+// prisma.config.ts at the project root for the datasource URL, and
+// src/server/db.ts for how the application constructs its
+// PrismaClient using a driver adapter.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
