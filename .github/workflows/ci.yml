@@ -7,6 +7,11 @@ name: CI
 permissions:
   contents: read
 
+env:
+  APP_ENV: test
+  APP_BASE_URL: http://localhost:3000
+  DATABASE_URL: postgresql://ci:ci@db-does-not-exist:5432/ci
+
 jobs:
   quality:
     name: Quality Gate
@@ -15,6 +20,7 @@ jobs:
     env:
       APP_ENV: test
       APP_BASE_URL: http://localhost:3000
+      DATABASE_URL: postgresql://ci:ci@db-does-not-exist:5432/ci
 
     steps:
       - name: Checkout
@@ -23,7 +29,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -42,6 +48,49 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Deployment is intentionally excluded from FND-003.
-      # Database/migration validation will be added only after DB-001
-      # defines the migration contract.
+  db-verification:
+    name: Database Verification
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      APP_ENV: test
+      APP_BASE_URL: http://localhost:3000
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npm run db:validate
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Verify migrations against PostgreSQL
+        run: npm run db:migrate:deploy
