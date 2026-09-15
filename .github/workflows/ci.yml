@@ -1,0 +1,68 @@
+name: CI
+
+# Runs on every push and pull request, on any branch. The repository
+# has not yet settled on a fixed branch-naming/protection strategy
+# (see FND-001/FND-002), so this intentionally does not filter by
+# branch name rather than inventing one. Narrow this to specific
+# branches (e.g. `main`) once that's decided.
+"on":
+  push:
+  pull_request:
+
+# Least-privilege: this workflow only checks out the repo and runs
+# read-only quality checks. It does not deploy, create releases,
+# write packages, open issues/PRs, or modify repository content.
+permissions:
+  contents: read
+
+# Safe, non-secret values for the FND-002 core configuration
+# contract. These are not credentials — see FND-002's README section
+# on APP_ENV/APP_BASE_URL. No future integration secrets
+# (DATABASE_URL, GOOGLE_CLIENT_*, STORAGE_*, TRANSLATION_*, VAPID_*)
+# are required or referenced here.
+env:
+  APP_ENV: test
+  APP_BASE_URL: http://localhost:3000
+
+jobs:
+  quality:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Project contract (FND-001) requires Node >=20.9.0. '20'
+          # resolves to the latest available Node 20.x release, which
+          # satisfies that contract.
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # Intentionally no deployment step: this workflow validates
+      # code quality only (FND-003). It does not deploy to Hostinger
+      # or anywhere else.
+
+      # Intentionally no database/migration validation step yet:
+      # DB-001 has not been implemented and has not defined a
+      # migration contract. A real migration/schema validation step
+      # will be added once DB-001 exists — adding a placeholder here
+      # that always succeeds would create a false green quality gate,
+      # which this workflow must not do.
