@@ -18,11 +18,32 @@ still infrastructure only.
 
 ## Requirements
 
-- Node.js 20.19 or later (raised from 20.9 by DB-001 — Prisma 7
-  requires `^20.19 || ^22.12 || >=24.0`)
+- Node.js 22.12 or later (raised from 20.19 during DB-001 correction —
+  see "Node engine requirement" below for why)
 - npm (bundled with Node.js)
 - PostgreSQL (for actual database work — not required to build, lint,
   typecheck, or run the app without touching the database)
+
+### Node engine requirement
+
+Although `prisma`/`@prisma/client` 7.10.0's own declared range
+(`^20.19 || ^22.12 || >=24.0`) nominally allows Node 20.19+, two of
+this project's actual installed dependencies do not support Node 20
+at all:
+
+- `prisma` depends on `@prisma/dev@0.24.17` (the package that
+  implements `prisma.config.ts` loading — see Database section below)
+  which depends on `@prisma/streams-local@0.1.11`, whose own
+  `package.json` declares `"engines": {"node": ">=22.0.0"}`.
+- `vitest@5.0.0` declares `"engines": {"node": "^22.12.0 || ^24.0.0 ||
+  >=26.0.0"}` — Node 20 is not in its supported range at all.
+
+Running on Node 20 produced real failures in GitHub Actions
+(`prisma.config.ts` failed to resolve `DATABASE_URL` even though it
+was correctly set), consistent with the `prisma.config.ts`-loading
+code path depending on `@prisma/dev`'s Node ≥22 requirement. Node
+22.12+ satisfies every installed dependency's declared engine range
+with no conflicts.
 
 ## Local Setup
 
@@ -186,8 +207,9 @@ automated quality gate for this repository, with two independent jobs.
 - **Runs on:** every `push` and every `pull_request`, on any branch
   (the repository hasn't fixed a branch-naming/protection strategy
   yet, so this isn't narrowed to e.g. `main` yet).
-- **Node version:** Node 20 (the latest available 20.x release),
-  matching the project's `>=20.19.0` engine contract.
+- **Node version:** Node 22 (the latest available 22.x release),
+  matching the project's `>=22.12.0` engine contract (see Requirements
+  above for why this is 22, not 20).
 - **Steps, in order:** checkout → set up Node (with npm's dependency
   cache) → `npm ci` → `npm run lint` → `npm run typecheck` → `npm
   test` → `npm run build`. Any failing step fails the whole job; none
